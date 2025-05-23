@@ -4,6 +4,9 @@ import { initDB, getDB, seedInitialGenericUsers } from './db/setup';
 // import { seedInitialRestaurantData } from './database/restaurantDb'; // Example
 import { runMainCLI } from './cli/main';
 import chalk from 'chalk';
+import { seedInitialRestaurantPreferences } from './db/restaurantDb';
+import { seedInitialMoviePreferences } from './db/movieDb';
+import { seedInitialTvShowPreferences } from './db/tvShowDb';
 
 async function main() {
   console.log(chalk.bold.cyan("🚀 Starting Advanced Recommender System 🚀"));
@@ -11,8 +14,10 @@ async function main() {
   await initDB(); // Initializes all tables
   console.log(chalk.green("Database connection established."));
 
-  await seedInitialGenericUsers(); // Seeds generic users if none exist
-  // await seedInitialRestaurantData(); // If you have restaurant-specific initial data
+  await seedInitialGenericUsers();       // 1. Generic users
+  await seedInitialRestaurantPreferences(); // 2. Restaurant prefs for users
+  await seedInitialMoviePreferences();      // 3. Movie prefs for users
+  await seedInitialTvShowPreferences();     // 4. TV Show prefs for users
 
   // The main CLI will now handle fetching data (like restaurants for a location) on demand.
   

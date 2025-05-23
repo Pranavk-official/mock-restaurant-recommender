@@ -1,8 +1,14 @@
 // src/common/tmdbService.ts
 import chalk from 'chalk';
-import type { Genre, WatchProviders, CastMember, Review, WatchProviderDetail } from './types'; // Common types
+import type { Genre, WatchProviders, CastMember, Review, WatchProviderDetail } from './types';
 
-const TMDB_API_KEY = process.env.TMDB_API_KEY;
+// In your .env file, you should have:
+// TMDB_API_READ_ACCESS_TOKEN="your_long_v4_read_access_token_here"
+// TMDB_API_KEY="your_shorter_v3_api_key_here" (optional, for fallback)
+
+const TMDB_API_READ_ACCESS_TOKEN = process.env.TMDB_API_READ_ACCESS_TOKEN;
+const TMDB_API_KEY_V3 = process.env.TMDB_API_KEY; // For fallback if Read Access Token is missing
+
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/';
 
@@ -17,45 +23,77 @@ interface TMDBPaginatedResponse<T> {
 // --- Core Fetch Function ---
 async function fetchTMDB<T>(
     endpoint: string,
-    params: Record<string, string | number | boolean> = {},
-    method: 'GET' | 'POST' = 'GET', // Added method for potential future POST requests
-    body?: any // For POST requests
+    params: Record<string, string | number | boolean> = {}, // Query parameters other than auth
+    method: 'GET' | 'POST' = 'GET',
+    body?: any
 ): Promise<T | null> {
-    if (!TMDB_API_KEY) {
-        console.error(chalk.red.bold("TMDB_API_KEY not found in .env file. Please set it."));
+    if (!TMDB_API_READ_ACCESS_TOKEN && !TMDB_API_KEY_V3) {
+        console.error(chalk.red.bold("Neither TMDB_API_READ_ACCESS_TOKEN nor TMDB_API_KEY (v3) found in .env file. Please set at least one."));
         return null;
     }
 
-    const urlParams = new URLSearchParams({
-        api_key: TMDB_API_KEY,
-        ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
-    });
+    let url = `${TMDB_BASE_URL}/${endpoint}`;
+    const fetchOptions: RequestInit = {
+        method,
+        headers: {
+            accept: 'application/json', // TMDB requires this header
+            // 'Content-Type': 'application/json', // Only needed for POST/PUT with body
+        },
+    };
 
-    const url = `${TMDB_BASE_URL}/${endpoint}?${urlParams.toString()}`;
-    // console.log(chalk.dim(`[TMDB Fetch] ${method} ${url.replace(TMDB_API_KEY, "TMDB_KEY_REDACTED")}`));
+    // Construct query parameters from the 'params' object
+    if (Object.keys(params).length > 0) {
+        const queryParams = new URLSearchParams(
+            Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]))
+        ).toString();
+        url += `?${queryParams}`;
+    }
+
+    // Prioritize Bearer Token (API Read Access Token)
+    if (TMDB_API_READ_ACCESS_TOKEN) {
+        (fetchOptions.headers as Record<string, string>)['Authorization'] = `Bearer ${TMDB_API_READ_ACCESS_TOKEN}`;
+    }
+    // Fallback to API Key in URL if Read Access Token is not provided (and API_KEY_V3 is)
+    // This is less common now but was the original v3 method.
+    else if (TMDB_API_KEY_V3) {
+        const existingParams = new URLSearchParams(url.split('?')[1] || '');
+        existingParams.set('api_key', TMDB_API_KEY_V3);
+        url = `${url.split('?')[0]}?${existingParams.toString()}`;
+        console.warn(chalk.yellow("[TMDB Service] Using fallback TMDB_API_KEY in URL. Preferred method is TMDB_API_READ_ACCESS_TOKEN in Authorization header."));
+    }
+
+
+    if (method === 'POST' && body) {
+        fetchOptions.body = JSON.stringify(body);
+        (fetchOptions.headers as Record<string, string>)['Content-Type'] = 'application/json';
+    }
+    
+    // console.log(chalk.dim(`[TMDB Fetch] ${method} ${url}`)); // For debugging, careful with tokens
+    // console.log(chalk.dim(`[TMDB Fetch Options] Headers: ${JSON.stringify(fetchOptions.headers)}`));
+
 
     try {
-        const fetchOptions: RequestInit = { method };
-        if (method === 'POST' && body) {
-            fetchOptions.body = JSON.stringify(body);
-            fetchOptions.headers = { 'Content-Type': 'application/json' };
-        }
-
         const response = await fetch(url, fetchOptions);
 
         if (!response.ok) {
             const errorData: any = await response.json().catch(() => ({
                 message: "Failed to parse error JSON from TMDB API response.",
-                status_code: response.status // TMDB specific error code
+                status_code: response.status
             }));
+            const authMethodUsed = TMDB_API_READ_ACCESS_TOKEN ? "API Read Access Token (Bearer)" : "API Key v3 (URL Param)";
             console.error(
-                chalk.red(`[TMDB API Error] ${response.status} for ${endpoint}:`),
+                chalk.red(`[TMDB API Error] ${response.status} for ${endpoint} (using ${authMethodUsed}):`),
                 errorData.status_message || errorData.message || response.statusText
             );
-            if (errorData.status_code === 7 || errorData.status_code === 34) { // Invalid API key or Resource not found
-                 console.error(chalk.yellow("Please double-check your TMDB_API_KEY and the endpoint."));
+            if (response.status === 401) {
+                 console.error(chalk.yellow(`This usually means your ${authMethodUsed.includes("Bearer") ? "TMDB_API_READ_ACCESS_TOKEN" : "TMDB_API_KEY"} is invalid, expired, or not authorized for this resource.`));
+                 console.error(chalk.yellow("Please verify your token/key in your .env file and on the TMDB website."));
             }
             return null;
+        }
+        // Handle cases where TMDB might return 204 No Content for some POST/DELETE actions
+        if (response.status === 204) {
+            return {} as T; // Or an appropriate success indicator
         }
         return (await response.json()) as T;
     } catch (error) {
@@ -64,27 +102,28 @@ async function fetchTMDB<T>(
     }
 }
 
+
 // --- MOVIE Specific TMDB Data Structures & Functions ---
-export interface TMDBMovie {
+export interface TMDBMovie { /* ... (as defined previously, ensure it's up-to-date) ... */
     id: number;
     title: string;
     overview: string;
-    release_date: string | null; // Can be null for some entries
+    release_date: string | null;
     vote_average: number;
     vote_count: number;
     poster_path: string | null;
     backdrop_path: string | null;
-    genre_ids?: number[]; // Popular/Search results often have only genre_ids
-    genres?: Genre[];    // Details endpoint provides full genre objects
+    genre_ids?: number[];
+    genres?: Genre[];
     runtime?: number | null;
     original_language?: string | null;
-    imdb_id?: string | null; // Usually on details, or via external_ids
+    imdb_id?: string | null;
     tagline?: string | null;
     popularity?: number;
     credits?: { cast: CastMember[] };
     reviews?: TMDBPaginatedResponse<Review>;
-    "watch/providers"?: { results: WatchProviders }; // Note: key has /
-    external_ids?: { imdb_id?: string | null; facebook_id?: string | null; wikidata_id?: string | null; instagram_id?: string | null; twitter_id?: string | null; };
+    "watch/providers"?: { results: WatchProviders };
+    external_ids?: { imdb_id?: string | null; /* ... other ids ... */ };
 }
 
 export async function getMovieDetails(movieId: number): Promise<TMDBMovie | null> {
@@ -108,7 +147,7 @@ export async function getMovieRecommendations(movieId: number, page: number = 1)
 }
 
 // --- TV SHOW Specific TMDB Data Structures & Functions ---
-export interface TMDBTvShow {
+export interface TMDBTvShow { /* ... (as defined previously, ensure it's up-to-date) ... */
     id: number;
     name: string;
     imdb_id?: string | null;
@@ -122,48 +161,43 @@ export interface TMDBTvShow {
     genres?: Genre[];
     number_of_seasons?: number | null;
     number_of_episodes?: number | null;
-    episode_run_time?: number[] | null; // Typically an array with one average runtime
+    episode_run_time?: number[] | null;
     original_language?: string | null;
     tagline?: string | null;
     popularity?: number;
-    status?: string; // e.g., "Returning Series", "Ended", "Canceled"
-    seasons?: TMDBSeasonSummary[]; // Summary of seasons often included in TV details
+    status?: string;
+    seasons?: TMDBSeasonSummary[];
     credits?: { cast: CastMember[] };
     reviews?: TMDBPaginatedResponse<Review>;
     "watch/providers"?: { results: WatchProviders };
-    external_ids?: { imdb_id?: string | null; tvdb_id?: number | null; facebook_id?: string | null; wikidata_id?: string | null; instagram_id?: string | null; twitter_id?: string | null; };
+    external_ids?: { imdb_id?: string | null; tvdb_id?: number | null; /* ... */ };
 }
-
-export interface TMDBSeasonSummary { // As returned in TV show details
+export interface TMDBSeasonSummary { /* ... (as defined previously) ... */
     air_date: string | null;
     episode_count: number;
-    id: number; // TMDB's own ID for the season object
+    id: number;
     name: string;
     overview: string;
     poster_path: string | null;
-    season_number: number; // The actual season number (0 for specials, 1, 2, ...)
+    season_number: number;
 }
-
-export interface TMDBFullSeason extends TMDBSeasonSummary { // For specific season details call
-    _id?: string; // Internal TMDB ID string for the season object (different from `id`)
+export interface TMDBFullSeason extends TMDBSeasonSummary { /* ... (as defined previously) ... */
+    _id?: string;
     episodes?: TMDBEpisodeSummary[];
 }
-
-export interface TMDBEpisodeSummary {
+export interface TMDBEpisodeSummary { /* ... (as defined previously) ... */
     air_date: string | null;
     episode_number: number;
-    id: number; // TMDB's own ID for the episode object
+    id: number;
     name: string;
     overview: string;
     production_code?: string | null;
     runtime?: number | null;
     season_number: number;
-    show_id?: number; // TMDB ID of the parent TV show
+    show_id?: number;
     still_path: string | null;
     vote_average: number;
     vote_count: number;
-    // crew?: any[]; // Detailed crew for the episode
-    // guest_stars?: any[]; // Detailed guest stars for the episode
 }
 
 export async function getTvShowDetails(tvId: number): Promise<TMDBTvShow | null> {
@@ -173,30 +207,23 @@ export async function getTvShowDetails(tvId: number): Promise<TMDBTvShow | null>
 }
 
 export async function getTvShowSeasonDetails(tvId: number, seasonNumber: number): Promise<TMDBFullSeason | null> {
-    // Fetches details for a specific season, usually includes episode summaries
     return fetchTMDB<TMDBFullSeason>(`tv/${tvId}/season/${seasonNumber}`);
 }
-
-// Individual episode details are rarely needed if season details are comprehensive enough
-// export async function getTvShowEpisodeDetails(tvId: number, seasonNumber: number, episodeNumber: number): Promise<TMDBEpisodeSummary | null> {
-// return fetchTMDB<TMDBEpisodeSummary>(`tv/${tvId}/season/${seasonNumber}/episode/${episodeNumber}`);
-// }
 
 export async function getPopularTvShows(page: number = 1): Promise<TMDBPaginatedResponse<TMDBTvShow> | null> {
      return fetchTMDB<TMDBPaginatedResponse<TMDBTvShow>>('tv/popular', { page });
 }
-
 export async function searchTvShows(query: string, page: number = 1, first_air_date_year?: number): Promise<TMDBPaginatedResponse<TMDBTvShow> | null> {
     const params: Record<string, string | number> = { query, page };
     if (first_air_date_year) params.first_air_date_year = first_air_date_year;
     return fetchTMDB<TMDBPaginatedResponse<TMDBTvShow>>('search/tv', params);
 }
-
 export async function getTvShowRecommendations(tvId: number, page: number = 1): Promise<TMDBPaginatedResponse<TMDBTvShow> | null> {
     return fetchTMDB<TMDBPaginatedResponse<TMDBTvShow>>(`tv/${tvId}/recommendations`, { page });
 }
 
 // --- GENRE LISTS (Cached) ---
+// ... (getMovieGenreList, getTvShowGenreList, mapMovieGenreIdsToObjects, mapTvGenreIdsToObjects as before) ...
 let movieGenreListCache: Genre[] | null = null;
 export async function getMovieGenreList(): Promise<Genre[]> {
     if (movieGenreListCache) return movieGenreListCache;
@@ -221,11 +248,9 @@ export async function getTvShowGenreList(): Promise<Genre[]> {
     return [];
 }
 
-// --- GENRE ID MAPPING ---
-// (These are more general now, could be moved to a common section if movie/tv genres were merged)
 export async function mapMovieGenreIdsToObjects(genre_ids?: number[]): Promise<Genre[]> {
     if (!genre_ids || genre_ids.length === 0) return [];
-    const fullGenreList = await getMovieGenreList(); // Uses cached list
+    const fullGenreList = await getMovieGenreList();
     return genre_ids
         .map(id => fullGenreList.find(g => g.id === id))
         .filter(g => g !== undefined) as Genre[];
@@ -233,14 +258,14 @@ export async function mapMovieGenreIdsToObjects(genre_ids?: number[]): Promise<G
 
 export async function mapTvGenreIdsToObjects(genre_ids?: number[]): Promise<Genre[]> {
     if (!genre_ids || genre_ids.length === 0) return [];
-    const fullGenreList = await getTvShowGenreList(); // Uses cached list
+    const fullGenreList = await getTvShowGenreList();
     return genre_ids
         .map(id => fullGenreList.find(g => g.id === id))
         .filter(g => g !== undefined) as Genre[];
 }
 
-// --- WATCH PROVIDER LISTS (For user preference selection) ---
-// Could be cached similarly to genres
+// --- WATCH PROVIDER LISTS ---
+// ... (getMovieWatchProviders, getTvWatchProviders as before) ...
 export async function getMovieWatchProviders(): Promise<{results: WatchProviderDetail[]} | null> {
     return fetchTMDB<{results: WatchProviderDetail[]}>(`watch/providers/movie`);
 }
@@ -248,8 +273,8 @@ export async function getTvWatchProviders(): Promise<{results: WatchProviderDeta
     return fetchTMDB<{results: WatchProviderDetail[]}>(`watch/providers/tv`);
 }
 
-
 // --- UTILITY ---
+// ... (getPosterUrl, getStillUrl as before) ...
 export function getPosterUrl(
     path: string | null,
     size: 'w92' | 'w154' | 'w185' | 'w342' | 'w500' | 'w780' | 'original' = 'w342'
@@ -257,9 +282,9 @@ export function getPosterUrl(
     return path ? `${TMDB_IMAGE_BASE_URL}${size}${path}` : null;
 }
 
-export function getStillUrl( // For episode stills
+export function getStillUrl( 
     path: string | null,
-    size: 'w92' | 'w185' | 'w300' | 'original' = 'w300' // TMDB has different sizes for stills
+    size: 'w92' | 'w185' | 'w300' | 'original' = 'w300'
 ): string | null {
     return path ? `${TMDB_IMAGE_BASE_URL}${size}${path}` : null;
 }

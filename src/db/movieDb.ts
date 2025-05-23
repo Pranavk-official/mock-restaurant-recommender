@@ -1,4 +1,5 @@
-import { getDB } from './setup';
+import { getDB, type User } from './setup';
+import { mockUserMoviePreferences } from '../movies/mockUserPreference';
 import type { Movie, UserMovieRating, UserMoviePreferences } from '../movies/types';
 // Use a clear alias for the type imported from tmdbService to avoid confusion with your internal Movie type
 import type { TMDBMovie as TMDBMovieFromService } from '../common/tmdbService';
@@ -184,6 +185,42 @@ export async function getUserMoviePreferences(userId: number): Promise<UserMovie
         min_imdb_rating: row.min_imdb_rating === null ? undefined : row.min_imdb_rating,
         preferred_streaming_providers: row.preferred_streaming_providers ? JSON.parse(row.preferred_streaming_providers) : undefined,
     };
+}
+
+export async function seedInitialMoviePreferences(): Promise<void> {
+    const db = await getDB();
+    const users = await db.all<User[]>('SELECT id, name FROM users ORDER BY id ASC'); // Get users, assuming IDs 1,2,3...
+
+    if (users.length === 0) {
+        // console.log(chalk.yellow("[MovieDB] No users found to seed movie preferences for. Run generic user seeding first."));
+        return;
+    }
+
+    // Check if preferences have already been seeded for the first user (as a proxy)
+    if (users.length > 0 && users[0]) {
+        const firstUserPref = await db.get('SELECT 1 FROM user_movie_preferences WHERE user_id = ?', users[0].id);
+        if (firstUserPref) {
+            // console.log(chalk.dim("[MovieDB] Movie preferences seem to be already seeded. Skipping."));
+            return;
+        }
+    }
+    
+    console.log(chalk.magenta("Seeding initial movie preferences for users..."));
+    let seededCount = 0;
+    for (let i = 0; i < Math.min(users.length, mockUserMoviePreferences.length); i++) {
+        const user = users[i]!;
+        const prefsToSeed: UserMoviePreferences = {
+            user_id: user.id,
+            ...mockUserMoviePreferences[i], // Spread the mock preference object
+        };
+        // Fill in any potentially missing optional fields with undefined or null as per your DB schema
+        // (Our mock data already aligns with the UserMoviePreferences structure with optional fields)
+        await saveUserMoviePreferences(prefsToSeed);
+        seededCount++;
+    }
+    if (seededCount > 0) {
+         console.log(chalk.magenta(`${seededCount} users had default movie preferences seeded.`));
+    }
 }
 
 // --- User Movie Ratings ---

@@ -1,4 +1,5 @@
-import { getDB } from './setup';
+import { getDB, type User } from './setup';
+import { mockUserTvShowPreferences } from '../tvshows/mockUserPreference';
 import type { TvShow, UserTvShowRating, UserTvShowPreferences } from '../tvshows/types';
 import type { TMDBTvShow as TMDBTvShowFromService } from '../common/tmdbService';
 import { mapTvGenreIdsToObjects } from '../common/tmdbService';
@@ -92,6 +93,41 @@ export async function getTvShowByTmdbId(tmdbId: number): Promise<TvShow | undefi
     const row = await db.get<any>('SELECT * FROM tv_shows WHERE tmdb_id = ?', tmdbId);
     return mapDbRowToTvShow(row);
 }
+
+// --- Seed Initial TV Show Preferences for Generic Users ---
+export async function seedInitialTvShowPreferences(): Promise<void> {
+    const db = await getDB();
+    const users = await db.all<User[]>('SELECT id, name FROM users ORDER BY id ASC');
+
+    if (users.length === 0) {
+        // console.log(chalk.yellow("[TvShowDB] No users found to seed TV show preferences for."));
+        return;
+    }
+
+    // At this point, users array is guaranteed to be non-empty.
+    const firstUser = users[0]!;
+    const firstUserPref = await db.get('SELECT 1 FROM user_tv_show_preferences WHERE user_id = ?', firstUser.id);
+    if (firstUserPref) {
+        // console.log(chalk.dim("[TvShowDB] TV show preferences seem to be already seeded. Skipping."));
+        return;
+    }
+
+    console.log(chalk.magenta("Seeding initial TV show preferences for users..."));
+    let seededCount = 0;
+    for (let i = 0; i < Math.min(users.length, mockUserTvShowPreferences.length); i++) {
+        const user = users[i]!;
+        const prefsToSeed: UserTvShowPreferences = {
+            user_id: user.id,
+            ...mockUserTvShowPreferences[i],
+        };
+        await saveUserTvShowPreferences(prefsToSeed);
+        seededCount++;
+    }
+     if (seededCount > 0) {
+        console.log(chalk.magenta(`${seededCount} users had default TV show preferences seeded.`));
+    }
+}
+
 
 // --- User TV Show Preferences ---
 export async function saveUserTvShowPreferences(prefs: UserTvShowPreferences): Promise<void> {
