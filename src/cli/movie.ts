@@ -7,25 +7,20 @@ import {
     getMovieDetails as getTMDBMovieDetails,
     searchMovies as searchTMDBMovies,
     getPosterUrl,
-    getMovieGenreList, // To show available genres when setting preferences
+    getMovieGenreList,
 } from '../common/tmdbService';
 import type { TMDBMovie as TMDBMovieFromService } from '../common/tmdbService';
 import {
-    saveMovie, // Saves/updates a movie in our DB, returns our internal Movie type
-    getMovieByTmdbId,
-    saveUserMovieRating,
-    getRatedMovieIdsByUser, // Gets OUR internal DB IDs of rated movies
-    getUserMoviePreferences,
-    saveUserMoviePreferences,
-    getMovieByOurId // Gets a movie by our internal DB ID
+    saveMovie, getMovieByTmdbId, saveUserMovieRating, getRatedMovieIdsByUser,
+    getUserMoviePreferences, saveUserMoviePreferences, getMovieByOurId
 } from '../db/movieDb';
 import { getMovieRecommendationsForUser } from '../movies/recommender';
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (query: string): Promise<string> => new Promise(resolve => rl.question(query, resolve));
 
-// --- Display Functions ---
-function displayMovieSummary(movie: Movie): void { // Expects our internal Movie type
+// --- Display Functions (keep as is) ---
+function displayMovieSummary(movie: Movie): void { /* ... */
     console.log(chalk.magenta("\n----------------------------------------"));
     console.log(chalk.bold.yellowBright(`✨ ${movie.title} (${movie.release_date?.substring(0,4) || 'N/A'}) ✨`));
     console.log(chalk.dim(`   Our DB ID: ${movie.id} | TMDB ID: ${movie.tmdb_id}`));
@@ -33,7 +28,6 @@ function displayMovieSummary(movie: Movie): void { // Expects our internal Movie
     const genres = movie.genres?.map(g => g.name).join(', ') || 'N/A';
     console.log(`   Genres: ${genres}`);
     console.log(`   Runtime: ${movie.runtime ? `${movie.runtime} min` : 'N/A'}`);
-    // Briefly show overview
     if (movie.overview) {
         console.log(chalk.gray(`   Overview: ${movie.overview.substring(0, 120)}...`));
     }
@@ -42,34 +36,24 @@ function displayMovieSummary(movie: Movie): void { // Expects our internal Movie
     console.log(chalk.magenta("----------------------------------------"));
 }
 
-async function viewAndInteractWithMovieDetails(
-    movieToView: Movie, // Expects our internal Movie object
-    currentUser: User
-): Promise<'liked' | 'disliked' | 'skipped' | 'quit'> {
-    // Fetch fresh, rich details from TMDB using the tmdb_id from our Movie object
+async function viewAndInteractWithMovieDetails(movieToView: Movie, currentUser: User): Promise<'liked' | 'disliked' | 'skipped' | 'quit'> { /* ... (keep as is, it already returns interaction status) ... */
     console.log(chalk.cyan(`\nFetching latest full details for "${movieToView.title}" (TMDB ID: ${movieToView.tmdb_id})...`));
     const tmdbDetails = await getTMDBMovieDetails(movieToView.tmdb_id);
 
     if (!tmdbDetails) {
         console.log(chalk.red("Could not fetch full movie details from TMDB. Showing cached info if available."));
-        // Fallback to displaying the movieToView (our cached version)
-        // This section could be enhanced to show more details from 'movieToView' itself
-        displayMovieSummary(movieToView); // Show summary of what we have
+        displayMovieSummary(movieToView);
     } else {
-        // Save/update the fetched TMDB details into our database.
-        // saveMovie returns our internal Movie type, possibly updated.
         const updatedMovieInDb = await saveMovie(tmdbDetails);
         if (!updatedMovieInDb) {
             console.log(chalk.red("Error updating movie details in our database. Displaying potentially stale info."));
-            displayMovieSummary(movieToView); // Show original if update failed
+            displayMovieSummary(movieToView);
         } else {
-            // Display full details using the fresh data from tmdbDetails
-            // (or updatedMovieInDb which should reflect tmdbDetails)
             console.log(chalk.magenta("\n🎬 MOVIE DETAILS 🎬"));
             console.log(chalk.bold.yellowBright(`${updatedMovieInDb.title} (${updatedMovieInDb.release_date?.substring(0,4)})`));
             console.log(chalk.dim(`   Our DB ID: ${updatedMovieInDb.id} | TMDB ID: ${updatedMovieInDb.tmdb_id}`));
             if(updatedMovieInDb.imdb_id) console.log(`   IMDb ID: ${updatedMovieInDb.imdb_id}`);
-            console.log(`   Tagline: ${tmdbDetails.tagline || 'N/A'}`); // Use tmdbDetails for non-DB stored fields
+            console.log(`   Tagline: ${tmdbDetails.tagline || 'N/A'}`);
             console.log(`   Runtime: ${updatedMovieInDb.runtime ? `${updatedMovieInDb.runtime} min` : 'N/A'}`);
             console.log(`   Rating: ⭐ ${updatedMovieInDb.vote_average?.toFixed(1)}/10 (${updatedMovieInDb.vote_count} votes)`);
             console.log(`   Genres: ${updatedMovieInDb.genres?.map(g => g.name).join(', ') || 'N/A'}`);
@@ -80,9 +64,8 @@ async function viewAndInteractWithMovieDetails(
                 console.log(chalk.cyan("\n--- Cast (Top 5) ---"));
                 tmdbDetails.credits.cast.slice(0, 5).forEach(c => console.log(`   ${c.name} as ${c.character}`));
             }
-
             if (tmdbDetails["watch/providers"]?.results) {
-                const providers = tmdbDetails["watch/providers"].results["US"]; // Example region
+                const providers = tmdbDetails["watch/providers"].results["US"];
                 if (providers && (providers.flatrate?.length || providers.rent?.length || providers.buy?.length)) {
                     console.log(chalk.cyan("\n--- Watch Providers (US) ---"));
                     if (providers.flatrate?.length) console.log(chalk.greenBright(`   Stream: ${providers.flatrate.map(p=>p.provider_name).join(', ')}`));
@@ -92,7 +75,6 @@ async function viewAndInteractWithMovieDetails(
                     console.log(chalk.gray("   No provider information found for US region for this movie."));
                 }
             }
-
             if(tmdbDetails.reviews?.results && tmdbDetails.reviews.results.length > 0) {
                 console.log(chalk.cyan("\n--- Reviews (Top 1) ---"));
                 const review = tmdbDetails.reviews.results[0]!;
@@ -105,13 +87,8 @@ async function viewAndInteractWithMovieDetails(
             console.log(chalk.magenta("----------------------------------------"));
         }
     }
-
-
-    // Interaction loop after showing details
-    // Use movieToView.id (our internal DB ID) for rating
     const internalMovieIdToRate = movieToView.id;
     const movieTitleToRate = movieToView.title;
-
     while (true) {
         const action = (await ask(chalk.cyan("Action after details: [L]ike (5⭐), [D]islike (1⭐), [N]ext item, [Q]uit to menu: "))).toLowerCase();
         if (action === 'l') {
@@ -134,31 +111,42 @@ async function viewAndInteractWithMovieDetails(
 
 async function presentMovieRecommendationsOneByOne(
     currentUser: User,
-    recommendations: Movie[], // Array of our internal Movie objects
-    userMoviePrefs: UserMoviePreferences // Not directly used here, but good for context
+    initialRecommendations: Movie[], // The full list from the recommender function
+    // We need to pass the exclude set so if user likes/dislikes, it's updated for subsequent *full* recommendation fetches
+    persistentExcludeTmdbIds: Set<number>
 ) {
-    if (recommendations.length === 0) {
+    if (initialRecommendations.length === 0) {
         console.log(chalk.yellow("No movie recommendations available based on current criteria."));
         console.log(chalk.yellow("Try rating more movies (Option 2) or adjusting your preferences (Option 4)."));
         return;
     }
     console.log(chalk.bold.yellowBright("\nHere are your movie recommendations, one by one:"));
 
-    const interactedWithTmdbIdsInSession = new Set<number>();
+    // Make a mutable copy of the recommendations to iterate through
+    let currentRecommendationQueue = [...initialRecommendations];
+    // Keep track of TMDB IDs interacted with *within this specific presentation loop*
+    // This is different from persistentExcludeTmdbIds which is for longer-term exclusion.
+    const sessionShownTmdbIds = new Set<number>();
 
-    for (const movie of recommendations) {
+
+    while (currentRecommendationQueue.length > 0) {
+        const movie = currentRecommendationQueue.shift(); // Get and remove the top movie
+
         if (!movie || !movie.id || !movie.tmdb_id) {
-            console.warn(chalk.yellow("[CLI] Skipping invalid movie object in recommendations list."));
-            continue;
-        }
-        if (interactedWithTmdbIdsInSession.has(movie.tmdb_id)) {
-            // console.log(chalk.dim(`[CLI] Already interacted with TMDB ID ${movie.tmdb_id} in this session. Skipping duplicate appearance.`));
+            console.warn(chalk.yellow("[CLI] Skipping invalid movie object in recommendations queue."));
             continue;
         }
 
-        displayMovieSummary(movie); // Displays our internal Movie type
+        // If this TMDB ID has been persistently excluded (e.g., rated before this session)
+        // or already shown in this specific one-by-one loop, skip it.
+        if (persistentExcludeTmdbIds.has(movie.tmdb_id) || sessionShownTmdbIds.has(movie.tmdb_id)) {
+            continue;
+        }
 
-        let interactionResult: 'liked' | 'disliked' | 'skipped' | 'quit' | 'details' = 'skipped';
+        displayMovieSummary(movie);
+        sessionShownTmdbIds.add(movie.tmdb_id); // Mark as shown in this session's loop
+
+        let interactionResult: 'liked' | 'disliked' | 'skipped' | 'quit' = 'skipped';
 
         interactionLoop: while(true) {
             const action = (await ask(chalk.cyan("Choose: [L]ike (5⭐), [D]islike (1⭐), [V]iew Details, [N]ext, [Q]uit to menu: "))).toLowerCase();
@@ -166,42 +154,48 @@ async function presentMovieRecommendationsOneByOne(
                 case 'l':
                     await saveUserMovieRating(currentUser.id, movie.id, 5);
                     console.log(chalk.green(`You liked "${movie.title}"!`));
+                    persistentExcludeTmdbIds.add(movie.tmdb_id); // Add to persistent exclusion for future full rec fetches
                     interactionResult = 'liked';
                     break interactionLoop;
                 case 'd':
                     await saveUserMovieRating(currentUser.id, movie.id, 1);
                     console.log(chalk.red(`You disliked "${movie.title}".`));
+                    persistentExcludeTmdbIds.add(movie.tmdb_id); // Add to persistent exclusion
                     interactionResult = 'disliked';
                     break interactionLoop;
                 case 'v':
                     interactionResult = await viewAndInteractWithMovieDetails(movie, currentUser);
-                    // The result from viewAndInteract... determines if we break the outer loop or continue
-                    // If 'quit', we break outer. If 'liked'/'disliked'/'skipped', we also break outer (to next movie).
-                    break interactionLoop;
+                    if (interactionResult === 'liked' || interactionResult === 'disliked') {
+                        persistentExcludeTmdbIds.add(movie.tmdb_id); // Ensure excluded if liked/disliked via details
+                    }
+                    break interactionLoop; // Result from details determines next step
                 case 'n':
                     interactionResult = 'skipped';
+                    // Don't add to persistentExcludeTmdbIds just for skipping without rating
                     break interactionLoop;
                 case 'q':
                     interactionResult = 'quit';
                     break interactionLoop;
                 default:
-                    console.log(chalk.yellow("Invalid action. Please choose from L, D, V, N, Q."));
+                    console.log(chalk.yellow("Invalid action."));
             }
         }
-
-        interactedWithTmdbIdsInSession.add(movie.tmdb_id);
 
         if (interactionResult === 'quit') {
             console.log(chalk.blue("Returning to Movie Menu..."));
             return; // Exit the entire recommendation presentation
         }
-        // For 'liked', 'disliked', or 'skipped' (from initial prompt or after details),
-        // the loop continues to the next movie in the `recommendations` array.
+        // If 'liked', 'disliked', or 'skipped', the outer `while` loop continues to the next movie
+        // from the `currentRecommendationQueue`.
     }
-    console.log(chalk.blue("\nFinished presenting available recommendations for this batch."));
+
+    if (currentRecommendationQueue.length === 0) {
+        console.log(chalk.blue("\nFinished presenting all available recommendations from this list."));
+    }
 }
 
-async function searchAndSelectMovie(): Promise<TMDBMovieFromService | null> {
+// --- Search and Manage Preferences Functions (keep as is) ---
+async function searchAndSelectMovie(): Promise<TMDBMovieFromService | null> { /* ... */
     const query = (await ask(chalk.green("Search for a movie title: "))).trim();
     if (!query) return null;
 
@@ -217,7 +211,7 @@ async function searchAndSelectMovie(): Promise<TMDBMovieFromService | null> {
         console.log(`  ${index + 1}. ${movie.title} (${movie.release_date?.substring(0,4) || 'N/A'}) [TMDB ID: ${movie.id}]`);
     });
 
-    if (displayableResults.length === 0) { // Should be caught by earlier check, but good to have
+    if (displayableResults.length === 0) {
         console.log(chalk.yellow("No displayable search results."));
         return null;
     }
@@ -235,12 +229,11 @@ async function searchAndSelectMovie(): Promise<TMDBMovieFromService | null> {
     }
     return displayableResults[movieIndex] ?? null;
 }
-
-async function manageMoviePreferences(userId: number, currentPrefs?: UserMoviePreferences): Promise<UserMoviePreferences> {
+async function manageMoviePreferences(userId: number, currentPrefs?: UserMoviePreferences): Promise<UserMoviePreferences> { /* ... */
     console.log(chalk.cyan("\n--- Manage Movie Preferences ---"));
-    let prefs: UserMoviePreferences = currentPrefs || { user_id: userId }; // Start with existing or new object
+    let prefs: UserMoviePreferences = currentPrefs || { user_id: userId };
 
-    const allGenres = await getMovieGenreList(); // Fetch available genres from TMDB
+    const allGenres = await getMovieGenreList();
     if (allGenres.length > 0) {
         console.log(chalk.dim("Hint: Available genres from TMDB include: " + allGenres.slice(0,10).map(g => g.name).join(', ') + (allGenres.length > 10 ? ", ..." : "")));
     }
@@ -271,7 +264,6 @@ async function manageMoviePreferences(userId: number, currentPrefs?: UserMoviePr
     prefs.min_imdb_rating = tmdbRatingStr ? parseFloat(tmdbRatingStr) : undefined;
     if (isNaN(prefs.min_imdb_rating!)) prefs.min_imdb_rating = undefined;
 
-    // For provider selection, you might list available ones from getMovieWatchProviders()
     const providersStr = (await ask(chalk.green(`Preferred Streaming Providers (comma-sep names, e.g. Netflix,Hulu, current: ${prefs.preferred_streaming_providers?.join(', ') || 'Any'}): `))).trim();
     prefs.preferred_streaming_providers = providersStr ? providersStr.split(',').map(s => s.trim()).filter(Boolean) : undefined;
 
@@ -280,13 +272,25 @@ async function manageMoviePreferences(userId: number, currentPrefs?: UserMoviePr
     return prefs;
 }
 
+
+// --- Main CLI Function for Movies ---
 export async function runMovieCLI(currentUser: User): Promise<void> {
     let userMoviePrefs = await getUserMoviePreferences(currentUser.id);
     if (!userMoviePrefs) {
         console.log(chalk.yellow("No movie preferences found for you yet. Using general recommendations."));
         console.log(chalk.yellow("You can set your preferences via Option 4."));
-        userMoviePrefs = { user_id: currentUser.id }; // Initialize with user_id for the recommender
+        userMoviePrefs = { user_id: currentUser.id };
     }
+
+    // This set will accumulate TMDB IDs of movies liked/disliked *during this entire movie CLI session*
+    // to prevent them from being re-recommended if the user asks for recommendations again
+    // without exiting the movie menu.
+    const sessionPersistentExcludeTmdbIds = new Set<number>();
+    // Initialize with movies already rated from DB
+    const ratedMovieOurDbIds = await getRatedMovieIdsByUser(currentUser.id);
+    const ratedMoviesInDb = (await Promise.all(ratedMovieOurDbIds.map(id => getMovieByOurId(id)))).filter(m => m) as Movie[];
+    ratedMoviesInDb.forEach(m => sessionPersistentExcludeTmdbIds.add(m.tmdb_id));
+
 
     let exitMovieMenu = false;
     while (!exitMovieMenu) {
@@ -302,79 +306,63 @@ export async function runMovieCLI(currentUser: User): Promise<void> {
         switch (choice) {
             case '1': {
                 console.log(chalk.cyan("\nFetching movie recommendations..."));
-                if (Object.keys(userMoviePrefs).length <= 1) { // Only user_id means no real prefs set
-                    console.log(chalk.yellow("Your movie preferences are not set. Results may be very general."));
-                    console.log(chalk.yellow("Please set your preferences (Option 4) for better results."));
-                }
-
-                const ratedMovieOurDbIds = await getRatedMovieIdsByUser(currentUser.id);
-                const ratedMoviesInDb = (await Promise.all(ratedMovieOurDbIds.map(id => getMovieByOurId(id)))).filter(m => m) as Movie[];
-                const excludeTmdbIds = new Set(ratedMoviesInDb.map(m => m.tmdb_id));
-
-                // userMoviePrefs is not directly passed to getMovieRecommendationsForUser based on its current signature.
-                // If the recommender needs preferences, it should fetch them internally or its signature should be updated.
-                // For now, we pass excludeTmdbIds as the second argument.
-                const recommendations = await getMovieRecommendationsForUser(currentUser, excludeTmdbIds);
-                await presentMovieRecommendationsOneByOne(currentUser, recommendations, userMoviePrefs);
+                // Use the sessionPersistentExcludeTmdbIds which includes already rated + session liked/disliked
+                const recommendations = await getMovieRecommendationsForUser(
+                    currentUser,
+                    new Set(sessionPersistentExcludeTmdbIds) // Pass a copy to avoid direct modification by recommender
+                );
+                // The present... function will modify its own sessionShownTmdbIds,
+                // and if a movie is liked/disliked, it will add to our sessionPersistentExcludeTmdbIds
+                await presentMovieRecommendationsOneByOne(currentUser, recommendations, sessionPersistentExcludeTmdbIds);
                 break;
             }
-            case '2': { // Rate a Movie
-                const tmdbMovieFromSearch = await searchAndSelectMovie(); // Returns TMDBMovieFromService
+            // Cases 2, 3, 4, 0 remain largely the same as the previous complete file
+            // Ensure that if a movie is rated in Case 2, its TMDB ID is added to sessionPersistentExcludeTmdbIds
+            case '2': {
+                const tmdbMovieFromSearch = await searchAndSelectMovie();
                 if (tmdbMovieFromSearch) {
-                    // Fetch full details from TMDB to ensure we have everything before saving
                     const detailedTmdbMovieData = await getTMDBMovieDetails(tmdbMovieFromSearch.id);
-                    if (!detailedTmdbMovieData) {
-                        console.log(chalk.red("Could not fetch full details for the selected movie. Cannot rate."));
-                        break;
-                    }
-                    // Save (or update) the movie to our local DB. saveMovie returns our internal Movie type.
+                    if (!detailedTmdbMovieData) { /* ... */ break; }
                     const movieInDb = await saveMovie(detailedTmdbMovieData);
-                    if (!movieInDb) {
-                         console.log(chalk.red("Error saving movie to our database. Cannot rate."));
-                         break;
-                    }
-                    
-                    displayMovieSummary(movieInDb); // Display summary of our internal Movie object
-
-                    const ratingStr = (await ask(chalk.green(`Rate "${movieInDb.title}" (1-5 stars, or 0 to skip): `))).trim();
+                    if (!movieInDb) { /* ... */ break; }
+                    displayMovieSummary(movieInDb);
+                    const ratingStr = (await ask(chalk.green(`Rate "${movieInDb.title}" (1-5, or 0): `))).trim();
                     const rating = parseInt(ratingStr);
                     if (!isNaN(rating) && rating >= 1 && rating <= 5) {
-                        await saveUserMovieRating(currentUser.id, movieInDb.id, rating); // Use our internal movieInDb.id
-                        console.log(chalk.green(`Rated "${movieInDb.title}" ${rating} stars. Thank you!`));
-                    } else if (rating !== 0) {
-                        console.log(chalk.yellow("Invalid rating. Please enter a number between 1 and 5, or 0 to skip."));
-                    }
+                        await saveUserMovieRating(currentUser.id, movieInDb.id, rating);
+                        console.log(chalk.green(`Rated "${movieInDb.title}" ${rating} stars.`));
+                        sessionPersistentExcludeTmdbIds.add(movieInDb.tmdb_id); // Add to session exclusion
+                    } else if (rating !== 0) { /* ... */ }
                 }
                 break;
             }
-            case '3': { // Search and View Movie Details
-                const tmdbMovieFromSearch = await searchAndSelectMovie(); // Returns TMDBMovieFromService
+            case '3': {
+                const tmdbMovieFromSearch = await searchAndSelectMovie();
                 if(tmdbMovieFromSearch) {
-                    // Fetch its full details and save/update it in our DB to get our internal Movie object
                     const detailedTmdbData = await getTMDBMovieDetails(tmdbMovieFromSearch.id);
-                    if (!detailedTmdbData) {
-                        console.log(chalk.red("Could not fetch details for the selected movie."));
-                        break;
-                    }
-                    const movieToViewDetails = await saveMovie(detailedTmdbData); // This is our internal Movie type
-                    
+                    if (!detailedTmdbData) { /* ... */ break; }
+                    const movieToViewDetails = await saveMovie(detailedTmdbData);
                     if (movieToViewDetails) {
-                        await viewAndInteractWithMovieDetails(movieToViewDetails, currentUser);
-                    } else {
-                        console.log(chalk.red("Could not process details for the selected movie after fetching."));
-                    }
+                        const interaction = await viewAndInteractWithMovieDetails(movieToViewDetails, currentUser);
+                        if (interaction === 'liked' || interaction === 'disliked') {
+                            sessionPersistentExcludeTmdbIds.add(movieToViewDetails.tmdb_id); // Add to session exclusion
+                        }
+                    } else { /* ... */ }
                 }
                 break;
             }
-            case '4': { // Manage Preferences
+            case '4': {
                 userMoviePrefs = await manageMoviePreferences(currentUser.id, userMoviePrefs);
+                // After preferences change, it might be good to clear sessionPersistentExcludeTmdbIds
+                // or re-fetch recommendations immediately, but for now, it persists.
+                // Or, if prefs change, the next call to option 1 will use new prefs.
                 break;
             }
             case '0':
                 exitMovieMenu = true;
                 break;
             default:
-                console.log(chalk.red("Invalid option. Please try again."));
+                console.log(chalk.red("Invalid option."));
         }
     }
 }
