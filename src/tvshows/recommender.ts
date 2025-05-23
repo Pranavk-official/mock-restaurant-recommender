@@ -94,7 +94,7 @@ export async function getTvShowRecommendationsForUser(
     user: User,
     userPrefs: UserTvShowPreferences,
     excludeTvShowTmdbIds: Set<number> = new Set(),
-    count: number = 5
+    count: number = Infinity
 ): Promise<TvShow[]> {
     const userRatings = await getUserTvShowRatings(user.id);
     let recommendations: TvShow[] = [];

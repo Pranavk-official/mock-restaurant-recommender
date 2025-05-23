@@ -39,7 +39,7 @@ async function getContentBasedRecommendations(
 export async function getMovieRecommendationsForUser(
     user: User,
     excludeMovieTmdbIds: Set<number> = new Set(), // TMDB IDs to exclude
-    count: number = 5
+    count: number = Infinity // Changed default from 5 to Infinity
 ): Promise<Movie[]> {
     const userRatings = await getUserMovieRatings(user.id);
     const recommendations: Movie[] = [];
